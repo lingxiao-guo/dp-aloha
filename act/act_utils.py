@@ -147,6 +147,8 @@ def get_norm_stats(dataset_dir, num_episodes):
 
     # normalize action data
     action_mean = all_action_data.mean(dim=[0, 1], keepdim=True)
+    action_max = torch.max(torch.abs(all_action_data))
+    action_min = torch.zeros_like(action_max)
     action_std = all_action_data.std(dim=[0, 1], keepdim=True)
     action_std = torch.clip(action_std, 1e-2, 10)  # clipping
 
@@ -154,12 +156,14 @@ def get_norm_stats(dataset_dir, num_episodes):
     qpos_mean = all_qpos_data.mean(dim=[0, 1], keepdim=True)
     qpos_std = all_qpos_data.std(dim=[0, 1], keepdim=True)
     qpos_std = torch.clip(qpos_std, 1e-2, 10)  # clipping
+    qpos_max = torch.max(torch.abs(all_qpos_data))
+    qpos_min = torch.zeros_like(qpos_max)
 
     stats = {
-        "action_mean": action_mean.numpy().squeeze(),
-        "action_std": action_std.numpy().squeeze(),
-        "qpos_mean": qpos_mean.numpy().squeeze(),
-        "qpos_std": qpos_std.numpy().squeeze(),
+        "action_mean": action_min.numpy().squeeze(),
+        "action_std": action_max.numpy().squeeze(),
+        "qpos_mean": qpos_min.numpy().squeeze(),
+        "qpos_std": qpos_max.numpy().squeeze(),
         "example_qpos": qpos,
     }
 

@@ -88,6 +88,7 @@ class Transformer(nn.Module):
             pos_embed = torch.cat([additional_pos_embed, pos_embed], axis=0)
 
             addition_input = torch.stack([latent_input, proprio_input], axis=0)
+
             src = torch.cat([addition_input, src], axis=0)
         else:
             assert len(src.shape) == 3

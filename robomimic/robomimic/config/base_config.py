@@ -32,6 +32,7 @@ def config_factory(algo_name, dic=None):
                 algo_name, ", ".join(REGISTERED_CONFIGS)
             )
         )
+    print(REGISTERED_CONFIGS)
     return REGISTERED_CONFIGS[algo_name](dict_to_load=dic)
 
 
@@ -271,7 +272,7 @@ class BaseConfig(Config):
 
         # =============== RGB default encoder (ResNet backbone + linear layer output) ===============
         self.observation.encoder.rgb.core_class = "VisualCore"
-        self.observation.encoder.rgb.core_kwargs.feature_dimension = 64
+        self.observation.encoder.rgb.core_kwargs.feature_dimension = 512
         self.observation.encoder.rgb.core_kwargs.flatten = True
         self.observation.encoder.rgb.core_kwargs.backbone_class = "ResNet18Conv"
         self.observation.encoder.rgb.core_kwargs.backbone_kwargs.pretrained = False
@@ -302,10 +303,10 @@ class BaseConfig(Config):
             None  # Can set to 'CropRandomizer' to use crop randomization
         )
         self.observation.encoder.rgb.obs_randomizer_kwargs.crop_height = (
-            76  # Default arguments for "CropRandomizer"
+            480  # Default arguments for "CropRandomizer"
         )
         self.observation.encoder.rgb.obs_randomizer_kwargs.crop_width = (
-            76  # Default arguments for "CropRandomizer"
+            640  # Default arguments for "CropRandomizer"
         )
         self.observation.encoder.rgb.obs_randomizer_kwargs.num_crops = (
             1  # Default arguments for "CropRandomizer"
@@ -327,16 +328,7 @@ class BaseConfig(Config):
         self.observation.encoder.scan.core_kwargs.pop("backbone_kwargs")
 
         # Scan: Modify the core class + kwargs, otherwise, is same as rgb encoder
-        self.observation.encoder.scan.core_class = "ScanCore"
-        self.observation.encoder.scan.core_kwargs.conv_activation = "relu"
-        self.observation.encoder.scan.core_kwargs.conv_kwargs.out_channels = [
-            32,
-            64,
-            64,
-        ]
-        self.observation.encoder.scan.core_kwargs.conv_kwargs.kernel_size = [8, 4, 2]
-        self.observation.encoder.scan.core_kwargs.conv_kwargs.stride = [4, 2, 1]
-
+        
     @property
     def use_goals(self):
         # whether the agent is goal-conditioned

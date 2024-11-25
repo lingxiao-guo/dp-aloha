@@ -159,6 +159,7 @@ class DETRVAE(nn.Module):
             # fold camera dimension into width dimension
             src = torch.cat(all_cam_features, axis=3)
             pos = torch.cat(all_cam_pos, axis=3)
+            
             hs = self.transformer(
                 src,
                 None,
@@ -237,6 +238,32 @@ class CNNMLP(nn.Module):
         features = torch.cat([flattened_features, qpos], axis=1)  # qpos: 14
         a_hat = self.mlp(features)
         return a_hat
+    
+    def get_encoder_feature(self, input_dict, env_state=None, actions=None):
+        """
+        qpos: batch, qpos_dim
+        image: batch, num_cam, channel, height, width
+        env_state: None
+        actions: batch, seq, action_dim
+        """
+        image = input_dict['image']
+        qpos = input_dict['qpos']
+        is_training = actions is not None  # train or val
+        bs, _ = qpos.shape
+        # Image observation features and position embeddings
+        all_cam_features = []
+        for cam_id, cam_name in enumerate(self.camera_names):
+            features, pos = self.backbones[cam_id](image[:, cam_id])
+            features = features[0]  # take the last layer feature
+            pos = pos[0]  # not used
+            all_cam_features.append(self.backbone_down_projs[cam_id](features))
+        # flatten everything
+        flattened_features = []
+        for cam_feature in all_cam_features:
+            flattened_features.append(cam_feature.reshape([bs, -1]))
+        flattened_features = torch.cat(flattened_features, axis=1)  # 768 each
+        features = torch.cat([flattened_features, qpos], axis=1)  # qpos: 14
+        return features
 
 
 def mlp(input_dim, hidden_dim, output_dim, hidden_depth):

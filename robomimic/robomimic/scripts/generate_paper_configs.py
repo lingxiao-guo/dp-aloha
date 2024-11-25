@@ -156,7 +156,7 @@ def modify_config_for_default_image_exp(config):
 
         # default image encoder architecture is ResNet with spatial softmax
         config.observation.encoder.rgb.core_class = "VisualCore"
-        config.observation.encoder.rgb.core_kwargs.feature_dimension = 64
+        config.observation.encoder.rgb.core_kwargs.feature_dimension = 512
         config.observation.encoder.rgb.core_kwargs.backbone_class = "ResNet18Conv"  # ResNet backbone for image observations (unused if no image observations)
         config.observation.encoder.rgb.core_kwargs.backbone_kwargs.pretrained = (
             False  # kwargs for visual core
@@ -180,8 +180,8 @@ def modify_config_for_default_image_exp(config):
         config.observation.encoder.rgb.obs_randomizer_class = "CropRandomizer"
 
         # kwargs for observation randomizers (for the CropRandomizer, this is size and number of crops)
-        config.observation.encoder.rgb.obs_randomizer_kwargs.crop_height = 76
-        config.observation.encoder.rgb.obs_randomizer_kwargs.crop_width = 76
+        config.observation.encoder.rgb.obs_randomizer_kwargs.crop_height = 480
+        config.observation.encoder.rgb.obs_randomizer_kwargs.crop_width = 640
         config.observation.encoder.rgb.obs_randomizer_kwargs.num_crops = 1
         config.observation.encoder.rgb.obs_randomizer_kwargs.pos_enc = False
 

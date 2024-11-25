@@ -1,6 +1,7 @@
 import torch
 import numpy as np
 import os
+os.environ['CUDA_VISIBLE_DEVICES'] = '5'
 import pickle
 import argparse
 import matplotlib.pyplot as plt
@@ -13,7 +14,7 @@ from act.constants import PUPPET_GRIPPER_JOINT_OPEN
 from act.act_utils import load_data  # data functions
 from act.act_utils import sample_box_pose, sample_insertion_pose  # robot functions
 from act.act_utils import compute_dict_mean, set_seed, detach_dict  # helper functions
-from act.policy import ACTPolicy, CNNMLPPolicy
+from act.policy import ACTPolicy, CNNMLPPolicy, DiffusionPolicy
 from act.visualize_episodes import save_videos
 
 from act.sim_env import BOX_POSE
@@ -86,6 +87,19 @@ def main(args):
             "num_queries": 1,
             "camera_names": camera_names,
         }
+    elif policy_class == "DP":
+        encoder_config = {
+            "lr": args["lr"],
+            "lr_backbone": lr_backbone,
+            "backbone": backbone,
+            "num_queries": 1,
+            "camera_names": camera_names,
+        }
+        policy_config = {
+            "cfg": args["diffusion_policy_cfg"],
+            "encoder":encoder_config,
+            "num_queries":48,
+        }
     else:
         raise NotImplementedError
 
@@ -106,7 +120,7 @@ def main(args):
     }
 
     if is_eval:
-        ckpt_names = [f"policy_best.ckpt"]
+        ckpt_names = [f"policy_epoch_900_seed_0.ckpt"]
         results = []
         for ckpt_name in ckpt_names:
             success_rate, avg_return = eval_bc(config, ckpt_name, save_episode=True)
@@ -148,6 +162,8 @@ def make_policy(policy_class, policy_config):
         policy = ACTPolicy(policy_config)
     elif policy_class == "CNNMLP":
         policy = CNNMLPPolicy(policy_config)
+    elif policy_class == "DP":
+        policy = DiffusionPolicy(policy_config)
     else:
         raise NotImplementedError
     return policy
@@ -157,6 +173,8 @@ def make_optimizer(policy_class, policy):
     if policy_class == "ACT":
         optimizer = policy.configure_optimizers()
     elif policy_class == "CNNMLP":
+        optimizer = policy.configure_optimizers()
+    elif policy_class == "DP":
         optimizer = policy.configure_optimizers()
     else:
         raise NotImplementedError
@@ -255,7 +273,7 @@ def eval_bc(config, ckpt_name, save_episode=True):
         target_qpos_list = []
         rewards = []
         with torch.inference_mode():
-            for t in range(max_timesteps):
+            for t in tqdm(range(max_timesteps)):
                 ### update onscreen render and wait for DT
                 if onscreen_render:
                     image = env._physics.render(
@@ -277,7 +295,7 @@ def eval_bc(config, ckpt_name, save_episode=True):
                 curr_image = get_image(ts, camera_names)
 
                 ### query policy
-                if config["policy_class"] == "ACT":
+                if config["policy_class"] == "ACT" or config["policy_class"] == "DP":
                     if t % query_frequency == 0:
                         all_actions = policy(qpos, curr_image)
                     if temporal_agg:
@@ -521,6 +539,9 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--task_name", action="store", type=str, help="task_name", required=True
+    )
+    parser.add_argument(
+        "--diffusion_policy_cfg", action="store", type=str, help="task_name", default='act/image_aloha_diffusion_policy_cnn.yaml'
     )
     parser.add_argument(
         "--batch_size", action="store", type=int, help="batch_size", required=True
