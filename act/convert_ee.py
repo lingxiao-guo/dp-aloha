@@ -5,7 +5,7 @@ import numpy as np
 import h5py
 import argparse
 import matplotlib.pyplot as plt
-from diffusion_policy.diffusion_policy.model.common.rotation_transformer import (
+from diffusion_policy.model.common.rotation_transformer import (
     RotationTransformer,
 )
 

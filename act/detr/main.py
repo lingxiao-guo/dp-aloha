@@ -13,6 +13,7 @@ e = IPython.embed
 
 def get_args_parser():
     parser = argparse.ArgumentParser("Set transformer detector", add_help=False)
+    parser.add_argument("--speed", action="store", type=int, help="seed")
     parser.add_argument("--lr", default=1e-4, type=float)  # will be overridden
     parser.add_argument("--lr_backbone", default=1e-5, type=float)  # will be overridden
     parser.add_argument("--batch_size", default=2, type=int)  # not used

@@ -1,3 +1,4 @@
+import torch
 import torch.nn as nn
 from torch.nn import functional as F
 import torchvision.transforms as transforms
@@ -55,6 +56,19 @@ class DiffusionPolicy(nn.Module):
 
     def configure_optimizers(self):
         return self.optimizer
+    
+    def get_samples(self, qpos, image, num_samples=10, actions=None, is_pad=None):
+        env_state = None
+        normalize = transforms.Normalize(
+            mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]
+        )
+        image = normalize(image)
+        image = torch.tile(image, (num_samples,1,1,1,1))
+        qpos = torch.tile(qpos, (num_samples, 1))
+        # inference time        
+        obs_dict = {'qpos':qpos,'image':image}
+        result = self.model.predict_action(obs_dict)
+        return result['action_pred']
     
     
 
