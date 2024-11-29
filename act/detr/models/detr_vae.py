@@ -37,6 +37,10 @@ def get_sinusoid_encoding_table(n_position, d_hid):
     return torch.FloatTensor(sinusoid_table).unsqueeze(0)
 
 
+def reparametrize_n(mu, std, n):
+    eps = Variable(std.data.new(n, *std.size()).normal_())
+    return mu.unsqueeze(0) + std.unsqueeze(0) * eps
+
 class DETRVAE(nn.Module):
     """This is the DETR module that performs object detection"""
 
@@ -179,7 +183,61 @@ class DETRVAE(nn.Module):
         a_hat = self.action_head(hs)
         is_pad_hat = self.is_pad_head(hs)
         return a_hat, is_pad_hat, [mu, logvar]
+    
+    def get_samples(self, qpos, image, env_state, num_samples, actions=None, is_pad=None):
+        """
+        qpos: batch, qpos_dim
+        image: batch, num_cam, channel, height, width
+        env_state: None
+        actions: batch, seq, action_dim
+        """
+        is_training = actions is not None  # train or val
+        bs, _ = qpos.shape
+        ### Obtain latent z from action sequence
+        if True:
+            mu = logvar = None
+            mu = logvar = torch.zeros([bs, self.latent_dim], dtype=torch.float32).to(qpos.device)
+            latent_sample = reparametrize_n(mu, logvar.div(2).exp(), num_samples)
+            latent_sample = latent_sample.reshape(num_samples*bs, self.latent_dim)
+            latent_input = self.latent_out_proj(latent_sample)
 
+        if self.backbones is not None:
+            # Image observation features and position embeddings
+            all_cam_features = []
+            all_cam_pos = []
+            for cam_id, cam_name in enumerate(self.camera_names):
+                features, pos = self.backbones[0](image[:, cam_id])  # HARDCODED
+                features = features[0]  # take the last layer feature
+                pos = pos[0]
+                all_cam_features.append(self.input_proj(features))
+                all_cam_pos.append(pos)
+            # proprioception features
+            proprio_input = self.input_proj_robot_state(qpos)
+            # fold camera dimension into width dimension
+            src = torch.cat(all_cam_features, axis=3)
+            pos = torch.cat(all_cam_pos, axis=3)
+            src = torch.repeat_interleave(src, num_samples, dim=0)
+            proprio_input = torch.repeat_interleave(proprio_input, num_samples, dim=0)
+            hs = self.transformer(
+                src,
+                None,
+                self.query_embed.weight,
+                pos,
+                latent_input,
+                proprio_input,
+                self.additional_pos_embed.weight,
+            )[0]
+        else:
+            qpos = self.input_proj_robot_state(qpos)
+            env_state = self.input_proj_env_state(env_state)
+            transformer_input = torch.cat([qpos, env_state], axis=1)  # seq length = 2
+            hs = self.transformer(
+                transformer_input, None, self.query_embed.weight, self.pos.weight
+            )[0]
+        a_hat = self.action_head(hs)
+        a_hat = a_hat.reshape(num_samples, bs, -1, 14)
+        is_pad_hat = None
+        return a_hat, is_pad_hat, [mu, logvar]
 
 class CNNMLP(nn.Module):
     def __init__(self, backbones, state_dim, camera_names):
@@ -195,6 +253,9 @@ class CNNMLP(nn.Module):
         super().__init__()
         self.camera_names = camera_names
         self.action_head = nn.Linear(1000, state_dim)  # TODO add more
+        self.proj = self.mlp = mlp(
+                input_dim=768+14, hidden_dim=512, output_dim=64, hidden_depth=2
+            )
         if backbones is not None:
             self.backbones = nn.ModuleList(backbones)
             backbone_down_projs = []
@@ -263,6 +324,8 @@ class CNNMLP(nn.Module):
             flattened_features.append(cam_feature.reshape([bs, -1]))
         flattened_features = torch.cat(flattened_features, axis=1)  # 768 each
         features = torch.cat([flattened_features, qpos], axis=1)  # qpos: 14
+        # features = self.proj(features)
+        # features = torch.cat([features, qpos], axis=1)  # qpos: 14
         return features
 
 
@@ -270,9 +333,9 @@ def mlp(input_dim, hidden_dim, output_dim, hidden_depth):
     if hidden_depth == 0:
         mods = [nn.Linear(input_dim, output_dim)]
     else:
-        mods = [nn.Linear(input_dim, hidden_dim), nn.ReLU(inplace=True)]
+        mods = [nn.Linear(input_dim, hidden_dim), nn.ELU(inplace=True)]
         for i in range(hidden_depth - 1):
-            mods += [nn.Linear(hidden_dim, hidden_dim), nn.ReLU(inplace=True)]
+            mods += [nn.Linear(hidden_dim, hidden_dim), nn.ELU(inplace=True)]
         mods.append(nn.Linear(hidden_dim, output_dim))
     trunk = nn.Sequential(*mods)
     return trunk
