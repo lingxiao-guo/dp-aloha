@@ -195,6 +195,7 @@ class CNNMLP(nn.Module):
         super().__init__()
         self.camera_names = camera_names
         self.action_head = nn.Linear(1000, state_dim)  # TODO add more
+        self.proj_head = nn.Linear(768, 64)
         if backbones is not None:
             self.backbones = nn.ModuleList(backbones)
             backbone_down_projs = []
@@ -262,6 +263,7 @@ class CNNMLP(nn.Module):
         for cam_feature in all_cam_features:
             flattened_features.append(cam_feature.reshape([bs, -1]))
         flattened_features = torch.cat(flattened_features, axis=1)  # 768 each
+        # flattened_features = self.proj_head(flattened_features)
         features = torch.cat([flattened_features, qpos], axis=1)  # qpos: 14
         return features
 

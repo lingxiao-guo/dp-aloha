@@ -37,6 +37,8 @@ class DiffusionPolicy(nn.Module):
         )
         image = normalize(image)
         if actions is not None:  # training time
+            actions = actions[:, ::2]
+            is_pad = is_pad[:, ::2]
             actions = actions[:, : self.model.horizon]
             is_pad = is_pad[:, : self.model.horizon]
             batch = {}
@@ -88,6 +90,8 @@ class ACTPolicy(nn.Module):
         )
         image = normalize(image)
         if actions is not None:  # training time
+            actions = actions[:, ::2]
+            is_pad = is_pad[:, ::2]
             actions = actions[:, : self.model.num_queries]
             is_pad = is_pad[:, : self.model.num_queries]
 

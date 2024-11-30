@@ -1,7 +1,7 @@
 import torch
 import numpy as np
 import os
-os.environ['CUDA_VISIBLE_DEVICES'] = '3'
+os.environ['CUDA_VISIBLE_DEVICES'] = '6'
 import pickle
 import math
 import argparse
@@ -125,11 +125,11 @@ def main(args):
     }
 
     if is_eval:
-        ckpt_names = [f"policy_epoch_6500_seed_0.ckpt"]  # 10000 for insertion, 6500 for transfer
+        ckpt_names = [f"policy_last.ckpt"]  # 10000 for insertion, 6500 for transfer
         results = []
         for ckpt_name in ckpt_names:
-            # success_rate, avg_return = eval_bc(config, ckpt_name, save_episode=True)
-            success_rate, avg_return = eval_speed_bc(config, ckpt_name, save_episode=True)
+            success_rate, avg_return = eval_bc(config, ckpt_name, save_episode=True)
+            # success_rate, avg_return = eval_speed_bc(config, ckpt_name, save_episode=True)
             results.append([ckpt_name, success_rate, avg_return])
 
         for ckpt_name, success_rate, avg_return in results:
@@ -516,12 +516,12 @@ def eval_speed_bc(config, ckpt_name, save_episode=True):
         tstep = np.linspace(0, 1, qpos_numpy.shape[0]-1) 
         fig, axes = plt.subplots(nrows=n_groups, ncols=1, figsize=(8, 2 * n_groups), sharex=True)
 
-        """for n, ax in enumerate(axes):
+        for n, ax in enumerate(axes):
             ax.plot(tstep, np.array(qpos_list)[1:, n], label=f'real qpos {n}')
             ax.plot(tstep, np.array(target_qpos_list)[:-1, n], label=f'target qpos {n}')
             ax.set_title(f'qpos {n}')
             ax.legend()
-        """
+        
         plt.xlabel('timestep')
         plt.ylabel('qpos')
         plt.tight_layout()
@@ -695,7 +695,8 @@ def eval_bc(config, ckpt_name, save_episode=True):
                     if t % query_frequency == 0:
                         all_actions = policy(qpos, curr_image)
                     if temporal_agg:
-                        all_time_actions[[t], t : t + num_queries] = all_actions
+                        all_actions = all_actions[:,::2]
+                        all_time_actions[[t], t : t + num_queries//2] = all_actions
                         actions_for_curr_step = all_time_actions[:, t]
                         actions_populated = torch.all(
                             actions_for_curr_step != 0, axis=1
@@ -730,6 +731,9 @@ def eval_bc(config, ckpt_name, save_episode=True):
                 target_qpos_list.append(target_qpos)
                 rewards.append(ts.reward)
 
+                if np.array(ts.reward) == env_max_reward:
+                    break
+
             plt.close()
         if real_robot:
             move_grippers(
@@ -752,12 +756,32 @@ def eval_bc(config, ckpt_name, save_episode=True):
             save_videos(
                 image_list,
                 DT,
-                video_path=os.path.join(ckpt_dir, f"video{rollout_id}.mp4"),
+                video_path=os.path.join(ckpt_dir, f"video{rollout_id}x2.mp4"),
             )
+        
+        n_groups = qpos_numpy.shape[-1]
+        tstep = np.linspace(0, 1, len(qpos_list)-1) 
+        fig, axes = plt.subplots(nrows=n_groups, ncols=1, figsize=(8, 2 * n_groups), sharex=True)
+
+        for n, ax in enumerate(axes):
+            ax.plot(tstep, np.array(qpos_list)[1:, n], label=f'real qpos {n}')
+            ax.plot(tstep, np.array(target_qpos_list)[:-1, n], label=f'target qpos {n}')
+            ax.set_title(f'qpos {n}')
+            ax.legend()
+        
+        plt.xlabel('timestep')
+        plt.ylabel('qpos')
+        plt.tight_layout()
+        fig.savefig(
+               os.path.join(ckpt_dir, f"plot/rollout{rollout_id}_qposx2.png")
+            )
+        plt.close()
+        print(f"Save qpos curve to {ckpt_dir}/plot/rollout{rollout_id}_qpos.png")
 
     success_rate = np.mean(np.array(highest_rewards) == env_max_reward)
     avg_return = np.mean(episode_returns)
     summary_str = f"\nSuccess rate: {success_rate}\nAverage return: {avg_return}\n\n"
+
     for r in range(env_max_reward + 1):
         more_or_equal_r = (np.array(highest_rewards) >= r).sum()
         more_or_equal_r_rate = more_or_equal_r / num_rollouts
