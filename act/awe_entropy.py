@@ -163,7 +163,7 @@ def dp_entropy_waypoint_selection(
         min_waypoints_required = float("inf")
         best_waypoints = []
 
-        for k in range(max(1,i-5), i):  # 1, i
+        for k in range(max(1,i-4), i):  # 1, i
             # waypoints are relative to the subsequence
             waypoints = [j - k for j in initial_waypoints if j >= k and j < i] + [i - k]
             total_traj_err, all_traj_err = func(

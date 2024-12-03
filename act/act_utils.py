@@ -337,7 +337,7 @@ def get_norm_stats(dataset_dir, num_episodes):
     
     stats = {
         "action_mean": action_mean.numpy().squeeze(),
-        "action_std": action_std.numpy().squeeze(),  # 2*action_std.numpy().squeeze() for DP
+        "action_std": 2*action_std.numpy().squeeze(),  # 2*action_std.numpy().squeeze() for DP
         "qpos_mean": qpos_mean.numpy().squeeze(),
         "qpos_std": qpos_std.numpy().squeeze(),
         "example_qpos": qpos,

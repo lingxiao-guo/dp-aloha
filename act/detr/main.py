@@ -14,6 +14,7 @@ e = IPython.embed
 def get_args_parser():
     parser = argparse.ArgumentParser("Set transformer detector", add_help=False)
     parser.add_argument("--speed", action="store", type=int, help="seed")
+    parser.add_argument("--eval_speed", action="store_true")
     parser.add_argument("--lr", default=1e-4, type=float)  # will be overridden
     parser.add_argument("--lr_backbone", default=1e-5, type=float)  # will be overridden
     parser.add_argument("--batch_size", default=2, type=int)  # not used
@@ -105,6 +106,7 @@ def get_args_parser():
 
     # repeat args in imitate_episodes just to avoid error. Will not be used
     parser.add_argument("--eval", action="store_true")
+    parser.add_argument("--label", action="store_true")
     parser.add_argument("--onscreen_render", action="store_true")
     parser.add_argument(
         "--ckpt_dir", action="store", type=str, help="ckpt_dir", required=True

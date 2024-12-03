@@ -37,8 +37,6 @@ class DiffusionPolicy(nn.Module):
         )
         image = normalize(image)
         if actions is not None:  # training time
-            actions = actions[:, ::2]
-            is_pad = is_pad[:, ::2]
             actions = actions[:, : self.model.horizon]
             is_pad = is_pad[:, : self.model.horizon]
             batch = {}
@@ -114,7 +112,19 @@ class ACTPolicy(nn.Module):
 
     def configure_optimizers(self):
         return self.optimizer
-
+    
+    def get_samples(self, qpos, image, actions=None, is_pad=None):
+        env_state = None
+        normalize = transforms.Normalize(
+            mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]
+        )
+        image = normalize(image)
+        if True:
+            a_hat, _, (_, _) = self.model.get_samples(
+                qpos, image, env_state, num_samples=10,
+            )  # no action, sample from prior
+            return a_hat
+            
 
 class CNNMLPPolicy(nn.Module):
     def __init__(self, args_override):
