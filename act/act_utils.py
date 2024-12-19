@@ -68,17 +68,9 @@ def plot_3d_trajectory(ax, traj_list, actions_var_norm=None, distance=None, labe
         # actions_var_log = [math.log(var+1e-8,1.5) for var in actions_var_norm] # math.log(var+1e-8)
         # actions_var_log = np.array(actions_var_log)
         actions_var_log = actions_var_norm
-        print(f"min log:{np.min(actions_var_log[:250])}|max log:{np.max(actions_var_log[:250])}")
-        # mark = (actions_var_log +14)/(14-2)
-        # for insertion:
-        # mark = (actions_var_log +20)/(18)
         mark = np.array(actions_var_log)
         # mark = np.exp(mark)/np.sum(np.exp(mark))
         key = bottom_20_percent_value(mark[:220])
-        print(f"20% idx:{key}")
-        # mark = (actions_var_norm)/5
-        # mark = (actions_var_log - np.mean(actions_var_log))/np.var(actions_var_log)
-        # mark = np.clip(1-actions_var_norm, 0,1)
     elif distance is not None:
         mark = [d*50 for d in distance]
 
@@ -183,12 +175,51 @@ def plot_3d_trajectory(ax, traj_list, actions_var_norm=None, distance=None, labe
 
     if legend:
         ax.legend()
-    print("cautious rates:",count/250)
     # ax.w_xaxis.set_pane_color((173/255, 216/255, 230/255, 1.0))
     # ax.w_yaxis.set_pane_color((173/255, 216/255, 230/255, 1.0))
     # ax.w_zaxis.set_pane_color((173/255, 216/255, 230/255, 1.0))
 
 
+def process_action_label(action, label, is_pad):
+    low_v = 2
+    high_v = 4
+    horizon, dim = action.shape
+    new_actions = torch.zeros_like(action)
+    new_labels = torch.zeros_like(label)
+    new_is_pad = torch.zeros_like(is_pad)
+
+    current_action = action  # Shape: (horizon, dim)
+    current_label = label  # Shape: (horizon,)
+    current_is_pad = is_pad
+
+    indices = []
+    i = -1
+    while i < horizon:
+        if current_label[i] == 0 and i+low_v < horizon:
+            i += low_v  # Skip next element
+            indices.append(i)
+        elif current_label[i] == 1:
+            # Check the next high_v elements if they exist
+            if i + high_v < horizon and torch.all(current_label[i:i + high_v] == 1):
+                i += high_v  # Skip the next 3 elements
+                indices.append(i)
+            else:
+                # Find the next 0 element if it exists
+                next_zero = (current_label[i + 1:] == 0).nonzero(as_tuple=True)[0]
+                if len(next_zero) > 0:
+                    i = i + 1 + next_zero[0].item()
+                    indices.append(i)
+                else:
+                    break  # No more 0s, stop
+        else:
+            i += 1
+    
+    # Use the indices to extract new action and label
+    new_actions[:len(indices)] = current_action[indices]
+    new_labels[:len(indices)] = current_label[indices]
+    new_is_pad[:len(indices)] = current_is_pad[indices]
+
+    return new_actions, new_is_pad
 
 class EpisodicDataset(torch.utils.data.Dataset):
     def __init__(
@@ -222,6 +253,7 @@ class EpisodicDataset(torch.utils.data.Dataset):
             is_sim = root.attrs["sim"]
             original_action_shape = root["/action"].shape
             episode_len = original_action_shape[0]
+            original_label_shape = root["/labels"].shape
             if sample_full_episode:
                 start_ts = 0
             else:
@@ -237,6 +269,7 @@ class EpisodicDataset(torch.utils.data.Dataset):
             # get all actions after and including start_ts
             if is_sim:
                 action = root["/action"][start_ts:]
+                label = root["/labels"][start_ts:]
                 action_len = episode_len - start_ts
             else:
                 action = root["/action"][
@@ -272,6 +305,8 @@ class EpisodicDataset(torch.utils.data.Dataset):
         self.is_sim = is_sim
         padded_action = np.zeros(original_action_shape, dtype=np.float32)
         padded_action[:action_len] = action
+        padded_labels = np.zeros(original_label_shape, dtype=np.float32)
+        padded_labels[:action_len] = label
         is_pad = np.zeros(episode_len)
         is_pad[action_len:] = 1
 
@@ -286,6 +321,7 @@ class EpisodicDataset(torch.utils.data.Dataset):
         qpos_data = torch.from_numpy(qpos).float()
         action_data = torch.from_numpy(padded_action).float()
         is_pad = torch.from_numpy(is_pad).bool()
+        label_data = torch.from_numpy(padded_labels).float()
 
         # channel last
         image_data = torch.einsum("k h w c -> k c h w", image_data)
@@ -298,7 +334,8 @@ class EpisodicDataset(torch.utils.data.Dataset):
         qpos_data = (qpos_data - self.norm_stats["qpos_mean"]) / self.norm_stats[
             "qpos_std"
         ]
-
+        # process action_data with entropy
+        action_data, is_pad = process_action_label(action_data, label_data, is_pad)
         return image_data, qpos_data, action_data, is_pad
 
 
@@ -321,9 +358,10 @@ def get_norm_stats(dataset_dir, num_episodes):
     action_mean = all_action_data.mean(dim=[0, 1], keepdim=True)
     action_std = all_action_data.std(dim=[0, 1], keepdim=True)
     action_std = torch.clip(action_std, 1e-2, 10)  # clipping
-    
-    action_max = torch.amax(all_action_data, dim=[0,1],keepdim=True)
-    action_min = torch.amin(all_action_data, dim=[0,1],keepdim=True)
+    action_max, _ = torch.max(all_action_data, 0, keepdim=True)
+    action_max,_ = torch.max(action_max,1, keepdim=True)
+    action_min, _ = torch.min(all_action_data, 0, keepdim=True)
+    action_min,_ = torch.min(action_min,1,keepdim=True)
     # [-1, 1] norm
     scale = (action_max - action_min)/2
     offset = action_min - (action_max-action_min)/2

@@ -99,9 +99,9 @@ class KDE():
         batch_size, num_samples, dim = x.size()
         # print(f"kde:{estimate_bandwidth(x[0])}")
         if self.flag:
-            bandwidth = self.estimate_bandwidth(x[0])
+            bandwidth = 1 # self.estimate_bandwidth(x[0])
             self.flag = False
-        bandwidth = 0.001 # 0.002 for insertion, 0.001 for transfer
+        bandwidth = 1
         # 计算高斯核
         kernel_values = gaussian_kernel(x, bandwidth)  # (batch_size, num_samples, num_samples)
     
@@ -116,7 +116,7 @@ class KDE():
         # 计算熵
         entropy = -log_density.mean(dim=1, keepdim=True)  # (batch_size, 1)
         
-        return entropy, x_max_likelihood
+        return entropy
 
     def kde_marginal_action_entropy(self,x):
         """

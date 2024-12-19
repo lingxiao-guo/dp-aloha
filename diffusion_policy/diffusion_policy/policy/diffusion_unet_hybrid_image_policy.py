@@ -158,7 +158,7 @@ class DiffusionUnetHybridImagePolicy(BaseImagePolicy):
         self.n_obs_steps = n_obs_steps
         self.obs_as_global_cond = obs_as_global_cond
         self.kwargs = kwargs
-
+        self.prior = None
         if num_inference_steps is None:
             num_inference_steps = noise_scheduler.config.num_train_timesteps
         self.num_inference_steps = num_inference_steps
@@ -181,14 +181,21 @@ class DiffusionUnetHybridImagePolicy(BaseImagePolicy):
     ):
         model = self.model
         scheduler = self.noise_scheduler
-
+        
         trajectory = torch.randn(
             size=condition_data.shape,
             dtype=condition_data.dtype,
             device=condition_data.device,
             generator=generator,
         )
-
+        if self.prior is None:
+            self.prior = torch.randn(
+            size=condition_data.shape,
+            dtype=condition_data.dtype,
+            device=condition_data.device,
+            generator=generator,
+            )
+        # trajectory = self.prior
         # set step values
         scheduler.set_timesteps(self.num_inference_steps)
 

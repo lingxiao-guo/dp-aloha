@@ -68,7 +68,7 @@ class DiffusionPolicy(nn.Module):
         # inference time        
         obs_dict = {'qpos':qpos,'image':image}
         result = self.model.predict_action(obs_dict)
-        return result['action_pred']
+        return result['action_pred'].unsqueeze(1)
     
     
 
@@ -88,8 +88,6 @@ class ACTPolicy(nn.Module):
         )
         image = normalize(image)
         if actions is not None:  # training time
-            actions = actions[:, ::2]
-            is_pad = is_pad[:, ::2]
             actions = actions[:, : self.model.num_queries]
             is_pad = is_pad[:, : self.model.num_queries]
 

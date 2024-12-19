@@ -1,7 +1,6 @@
 import torch
 import numpy as np
 import os
-os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 import pickle
 import math
 import h5py
@@ -105,7 +104,7 @@ def main(args):
         policy_config = {
             "cfg": args["diffusion_policy_cfg"],
             "encoder":encoder_config,
-            "num_queries": 48,
+            "num_queries": 24,
         }
     else:
         raise NotImplementedError
@@ -141,7 +140,7 @@ def main(args):
         exit()
     
     if is_eval_speed:
-        ckpt_names = [f"policy_last.ckpt"]  # 10000 for insertion, 6500 for transfer
+        ckpt_names = [f"policy_best.ckpt"]  # 10000 for insertion, 6500 for transfer
         results = []
         for ckpt_name in ckpt_names:
             success_rate, avg_return = eval_speed_bc(config, ckpt_name, save_episode=True)
@@ -153,7 +152,7 @@ def main(args):
         exit()
     
     if is_label:
-        ckpt_names = [f"policy_last.ckpt"]  # 10000 for insertion, 6500 for transfer
+        ckpt_names = [f"policy_best.ckpt"]  # 10000 for insertion, 6500 for transfer
         results = []
         for ckpt_name in ckpt_names:
             success_rate, avg_return = label_entropy(config, ckpt_name, save_episode=True)
@@ -198,7 +197,7 @@ def speed_awe_entropy(actions, entropy, threshold):
         return actions
 
 def eval_speed_bc(config, ckpt_name, save_episode=True):
-    set_seed(100)
+    set_seed(1000)
     ckpt_dir = config["ckpt_dir"]
     state_dim = config["state_dim"]
     real_robot = config["real_robot"]
@@ -246,7 +245,7 @@ def eval_speed_bc(config, ckpt_name, save_episode=True):
 
     max_timesteps = int(max_timesteps * 1)  # may increase for real-world tasks
     max_timesteps = max_timesteps
-    num_rollouts = 10
+    num_rollouts = 50
     episode_returns = []
     highest_rewards = []
     max_entropy_list = []
@@ -318,13 +317,16 @@ def eval_speed_bc(config, ckpt_name, save_episode=True):
 
                 ### query policy
                 if config["policy_class"] == "ACT" or config["policy_class"] == "DP":
+                    query_frequency = 24
                     if t % query_frequency == 0: # openloop_t == waypoint_count:
                         # get entropy
-                        action_samples = policy.get_samples(qpos, curr_image)
-                        all_actions = action_samples[[0]]
-                        action_samples = action_samples.squeeze().permute(1,0,2) # (chunk_len, num_samples, dim)
-                        entropy = torch.mean(torch.std(action_samples,dim=1),dim=-1)
-                        # all_actions = all_actions[:,::speed]
+                        # action_samples = policy.get_samples(qpos, curr_image)            
+                        # all_actions = action_samples[0]
+                        # action_samples = action_samples.squeeze().permute(1,0,2) # (chunk_len, num_samples, dim)
+                        # entropy = torch.mean(torch.std(action_samples,dim=1),dim=-1)
+                        all_actions = policy(qpos, curr_image)
+                        entropy = torch.mean(torch.std(all_actions,dim=0),dim=-1)
+                        all_actions = all_actions[:,::speed]
                         # all_actions = speed_awe_entropy(all_actions.squeeze(), entropy, threshold=0.002)
                         waypoint_count = all_actions.shape[1]
                         openloop_t = 0
@@ -419,8 +421,8 @@ def eval_speed_bc(config, ckpt_name, save_episode=True):
                         traj_action_entropy.append(entropy.squeeze())
                             
                     else:
-                        # raw_action = all_actions[:, t % query_frequency]
-                        raw_action = all_actions[:, openloop_t]
+                        raw_action = all_actions[:, t % query_frequency]
+                        # raw_action = all_actions[:, openloop_t]
                         traj_action_entropy.append(entropy[t % query_frequency])
                         openloop_t += 1
 
@@ -619,7 +621,7 @@ def label_entropy(config, ckpt_name, save_demos=False,save_episode=True):
         env_max_reward = env.task.max_reward
     
     query_frequency = policy_config["num_queries"]
-    if True: # temporal_agg: 
+    if temporal_agg: 
         query_frequency = 1
         num_queries = policy_config["num_queries"]
 
@@ -642,12 +644,9 @@ def label_entropy(config, ckpt_name, save_demos=False,save_episode=True):
             for cam_name in camera_names:
                 all_cam_images.append(image_dict[cam_name])
             all_cam_images = np.stack(all_cam_images, axis=1)
-            print(all_cam_images.shape)
-            print(all_qpos.shape)
-        
 
         ### evaluation loop
-        if True: # temporal_agg:
+        if temporal_agg:
             all_time_actions = torch.zeros(
                 [max_timesteps, max_timesteps + num_queries, state_dim]
             ).cuda()
@@ -678,19 +677,21 @@ def label_entropy(config, ckpt_name, save_demos=False,save_episode=True):
                 curr_image = all_cam_images[t]
                 obs = {}
                 obs['images'] = {'top':curr_image[0]}
-                curr_image = torch.from_numpy(curr_image).float().cuda().unsqueeze(0)                
+                curr_image = torch.from_numpy(curr_image / 255.0).float().cuda().unsqueeze(0)       
                 curr_image = curr_image.permute(0,1,4,2,3)
                 
              
                 ### query policy
-                if config["policy_class"] == "ACT":
+                if config["policy_class"] == "ACT"  or config["policy_class"] == "DP":
                     if t % query_frequency == 0:
-                        action_samples = policy.get_samples(qpos, curr_image)
-                        all_actions = action_samples[[0]]
-                        
-                    if True: # temporal_agg:
+                        action_samples = policy.get_samples(qpos, curr_image) # (chunk_len, num_samples, 1，dim)
+                        all_actions = action_samples[0]
+                        action_samples = action_samples.squeeze().permute(1,0,2) # (chunk_len, num_samples, dim)
+                        entropy_chunk = torch.mean(torch.std(action_samples,dim=1),dim=-1)
+                    entropy = entropy_chunk[t % query_frequency]
+                    if temporal_agg:
                         all_time_actions[[t], t : t + num_queries] = all_actions
-                        all_time_samples[[t], t : t+ num_queries] = action_samples.permute(1,2,0,3)
+                        all_time_samples[[t], t : t+ num_queries] = action_samples
                             
                         actions_for_curr_step = all_time_actions[:, t]
                         actions_populated = torch.all(
@@ -702,9 +703,11 @@ def label_entropy(config, ckpt_name, save_demos=False,save_episode=True):
                             actions_for_next_step != 0, axis=1
                         )
                         samples_for_curr_step = all_time_samples[:, t]
-                        samples_for_curr_step = samples_for_curr_step[samples_populated]
-                        
-                        entropy = torch.mean(torch.std(samples_for_curr_step.flatten(0,1),dim=0),dim=-1)
+                        samples_for_curr_step = samples_for_curr_step[samples_populated] 
+
+                        # entropy = torch.log(torch.mean(torch.var(samples_for_curr_step.flatten(0,1),dim=0),dim=-1))
+                        entropy = KDE.kde_entropy(samples_for_curr_step.flatten(0,1).unsqueeze(0)).squeeze()
+                        # entropy = torch.log(torch.mean(torch.var(action_samples[0],dim=0),dim=-1))
                         exp_weights = np.exp(-0.01 * np.arange(len(actions_for_curr_step)))
                         exp_weights = exp_weights / exp_weights.sum()
                         exp_weights = (
@@ -725,6 +728,7 @@ def label_entropy(config, ckpt_name, save_demos=False,save_episode=True):
                 entropy_numpy = np.array(traj_action_entropy[-1].cpu())
                 store_imgs = {}
                 for key, img in obs["images"].items():
+                    img = put_text(img,t,position="bottom")
                     store_imgs[key] = put_text(img,entropy_numpy)
                 if "images" in obs:
                     image_list.append(store_imgs)
@@ -781,7 +785,7 @@ def label_entropy(config, ckpt_name, save_demos=False,save_episode=True):
             save_videos(
                 image_list,
                 DT,
-                video_path=os.path.join(ckpt_dir, f"video/rollout{rollout_id}.mp4"),
+                video_path=os.path.join(ckpt_dir, f"label/rollout{rollout_id}.mp4"),
             )
             fig.savefig(
                 os.path.join(ckpt_dir, f"plot/rollout{rollout_id}.png")
@@ -794,6 +798,22 @@ def label_entropy(config, ckpt_name, save_demos=False,save_episode=True):
             
         plt.close(fig)
         save_labels = True
+        # actions_entropy_norm = np.abs(np.diff(actions_entropy_norm))
+        indices = np.arange(len(actions_entropy_norm))
+        std = np.std(actions_entropy_norm)
+        mean = np.mean(actions_entropy_norm)
+        plt.figure(figsize=(10, 6))
+        plt.plot(indices, actions_entropy_norm, marker='o')  # 使用点标记每个数据点
+        plt.ylim([0, mean+2*std])
+        plt.title('1D Data Plot')
+        plt.xlabel('Timestep')
+        plt.ylabel('Entropy')
+        plt.grid(True)  # 添加网格线
+        plt.savefig(os.path.join(ckpt_dir, f"plot/rollout{rollout_id}_entropy_incline.png"), bbox_inches='tight') 
+        actions_entropy_norm = (actions_entropy_norm-mean)/std
+        indices = (indices-np.mean(indices))/np.std(indices)
+        data = np.stack((indices,actions_entropy_norm),axis=-1)
+        labels = hdbscan_with_custom_merge(data, ckpt_dir, rollout_id)
         if save_labels:
             with h5py.File(dataset_path, "r+") as root:
                 name = f"/entropy"
@@ -802,11 +822,210 @@ def label_entropy(config, ckpt_name, save_demos=False,save_episode=True):
                 except:
                     del root[name]
                     root[name] = actions_entropy_norm  
+            
+            with h5py.File(dataset_path, "r+") as root:
+                name = f"/labels" # 0 for precision, 1 for non-precision
+                try:
+                    root[name] = labels
+                except:
+                    del root[name]
+                    root[name] = labels
 
-    
-    return success_rate, avg_return
-    
 
+from sklearn.cluster import KMeans
+from sklearn.metrics.pairwise import rbf_kernel
+from scipy.sparse.linalg import eigsh
+from sklearn.metrics import silhouette_score
+from sklearn.cluster import KMeans
+import hdbscan
+from sklearn.datasets import make_blobs
+
+
+def hdbscan_with_custom_merge(X, dir, rollout_id, plot=True):
+    """
+    使用HDBSCAN进行初步聚类，并根据规则进一步合并：
+    - 第二个特征值小于0的点合并为一个簇；
+    - 其余点合并为另一个簇；
+    - 离群点 (-1 标签) 不参与合并。
+
+    参数:
+    X (array-like): 输入的数据
+    dir (str): 保存图像的目录路径
+    rollout_id (int): 用于标记图像文件名
+    plot (bool): 是否绘制聚类结果
+
+    返回:
+    labels (array): 合并后的簇标签
+    """
+    # 初始化 HDBSCAN
+    clusterer = hdbscan.HDBSCAN(min_cluster_size=5)
+    clusterer.fit(X)
+    
+    # 初步聚类的标签
+    initial_labels = clusterer.labels_
+
+    # 将前?个点标记为离群点
+    initial_labels[:50] = -1
+
+    # 获取非离群点的唯一标签
+    unique_labels = np.unique(initial_labels[initial_labels >= 0])  # 排除噪声点 (-1)
+
+    # 初始化合并后的标签
+    refined_labels = np.full_like(initial_labels, -1)  # 默认所有点为离群值
+
+    # 合并规则：
+    # - 第二个特征 < 0 的点分为一类（合并到 0 类）
+    # - 其余点分为另一类（合并到 1 类）
+    for label in unique_labels:
+        # 获取当前簇的点
+        cluster_points = X[initial_labels == label]
+        
+        # 判断当前簇的第二个特征的值是否全部小于 0
+        if np.all(cluster_points[:, 1] < 0):
+            refined_labels[initial_labels == label] = 0  # 合并到第 0 类
+        else:
+            refined_labels[initial_labels == label] = -1  # 合并到第 1 类
+
+    # 可视化初步聚类结果
+    if plot:
+        plt.figure(figsize=(8, 6))
+        plt.scatter(X[:, 0], X[:, 1], c=initial_labels, cmap='viridis', marker='o')
+        plt.title('HDBSCAN Initial Clustering')
+        plt.xlabel('Feature 1')
+        plt.ylabel('Feature 2')
+        plt.colorbar(label='Cluster Label')
+        os.makedirs(os.path.join(dir, "plot"), exist_ok=True)
+        plt.savefig(os.path.join(dir, f"plot/rollout{rollout_id}-hdbscan-raw.png"))
+        plt.close()
+
+    # 可视化合并后的结果
+    if plot:
+        plt.figure(figsize=(8, 6))
+        scatter = plt.scatter(X[:, 0], X[:, 1], c=refined_labels, cmap='viridis', marker='o')
+        cbar = plt.colorbar(scatter)
+        cbar.set_label('Refined Cluster Label', rotation=270, labelpad=15)
+        plt.title('HDBSCAN + Custom Merge Clustering')
+        plt.xlabel('Feature 1')
+        plt.ylabel('Feature 2')
+        plt.grid(True)
+        plt.savefig(os.path.join(dir, f"plot/rollout{rollout_id}-hdbscan-refine.png"))
+        plt.close()
+    return np.abs(refined_labels)
+
+
+def kmeans_clustering(data,dir, rollout_id, max_clusters=10, plot_results=True):
+    """
+    使用 KMeans 对一维或二维数据进行自动分段。
+
+    参数：
+    - data (array-like): 输入数据，可以是一维或二维数组。
+    - max_clusters (int): 最大尝试的簇数量。
+    - plot_results (bool): 是否绘制可视化图表。
+
+    返回：
+    - labels (ndarray): 每个数据点的聚类标签。
+    - optimal_clusters (int): 自动确定的簇数量。
+    """
+    silhouette_scores = []
+    models = []
+
+    # Step 1: 尝试不同的簇数量
+    for k in range(2, max_clusters + 1):
+        kmeans = KMeans(n_clusters=k, random_state=42).fit(data)
+        labels = kmeans.labels_
+        score = silhouette_score(data, labels)
+        silhouette_scores.append(score)
+        models.append((kmeans, labels))
+
+    # Step 2: 找到最佳簇数（Silhouette 分数最大）
+    optimal_clusters = np.argmax(silhouette_scores) + 2  # 索引偏移+2 对应簇数
+    best_model, best_labels = models[optimal_clusters - 2]
+
+    if plot_results:
+        # 绘制 Silhouette 分数随簇数变化
+        plt.figure(figsize=(8, 5))
+        plt.plot(range(2, max_clusters + 1), silhouette_scores, marker="o", label="Silhouette Score")
+        plt.xlabel("Number of Clusters")
+        plt.ylabel("Silhouette Score")
+        plt.title("Silhouette Analysis")
+        plt.grid()
+        plt.axvline(optimal_clusters, color="r", linestyle="--", label="Optimal k")
+        plt.legend()
+        plt.show()
+
+        # 可视化聚类结果（仅支持二维数据）
+        if data.shape[1] == 2:
+            plt.figure(figsize=(8, 5))
+            plt.scatter(data[:, 0], data[:, 1], c=best_labels, cmap="viridis", label="Clusters")
+            plt.xlabel("Feature 1")
+            plt.ylabel("Feature 2")
+            plt.title("KMeans Clustering Result")
+            plt.grid()
+            plt.legend()
+            plt.savefig(
+                os.path.join(dir, f"plot/rollout{rollout_id}-kmeans.png")
+            )
+    return best_labels, optimal_clusters
+
+def spectral_clustering(data, dir, rollout_id,gamma=15, max_eigenvectors=10, plot_results=True):
+    """
+    使用谱聚类对一维或二维数据进行自动分段。
+
+    参数：
+    - data (array-like): 输入数据，可以是一维或二维数组。
+    - gamma (float): 高斯核的参数，控制相似度矩阵的敏感性。
+    - max_eigenvectors (int): 用于计算的最大特征向量数。
+    - plot_results (bool): 是否绘制可视化图表。
+
+    返回：
+    - labels (ndarray): 每个数据点的聚类标签。
+    - optimal_clusters (int): 自动确定的簇数量。
+    """
+    # Step 1: 构建相似度矩阵（高斯核）
+    gamma = 1
+    similarity_matrix = rbf_kernel(data, gamma=gamma)
+
+    # Step 2: 构建拉普拉斯矩阵
+    degree_matrix = np.diag(similarity_matrix.sum(axis=1))
+    laplacian_matrix = degree_matrix - similarity_matrix
+
+    # Step 3: 计算拉普拉斯矩阵的特征值和特征向量
+    eigvals, eigvecs = eigsh(laplacian_matrix, k=max_eigenvectors, which="SM")
+
+    # Step 4: 使用 Eigengap 启发式确定簇数
+    optimal_clusters = 2 #np.argmax(eigengap) + 1
+
+    # Step 5: 聚类
+    selected_eigvecs = eigvecs[:, :optimal_clusters]
+    kmeans = KMeans(n_clusters=optimal_clusters, random_state=42).fit(selected_eigvecs)
+    labels = kmeans.labels_
+
+    if plot_results:
+        # 绘制特征值谱和 Eigengap
+        plt.figure(figsize=(8, 5))
+        plt.plot(range(1, len(eigvals) + 1), eigvals, marker="o", label="Eigenvalues")
+        plt.xlabel("Index")
+        plt.ylabel("Eigenvalue")
+        plt.title("Eigengap Analysis")
+        plt.grid()
+        plt.axvline(optimal_clusters, color="r", linestyle="--", label="Optimal k")
+        plt.legend()
+
+        # 可视化聚类结果（仅支持二维数据）
+        if data.shape[1] == 2:
+            plt.figure(figsize=(8, 5))
+            plt.scatter(data[:, 0], data[:, 1], c=labels, cmap="viridis", label="Clusters")
+            plt.xlabel("Feature 1")
+            plt.ylabel("Feature 2")
+            plt.title("Spectral Clustering Result")
+            plt.grid()
+            plt.legend()
+            plt.savefig(
+                os.path.join(dir, f"plot/rollout{rollout_id}-spectral.png")
+            )
+
+    return labels, optimal_clusters
+    
 def make_policy(policy_class, policy_config):
     if policy_class == "ACT":
         policy = ACTPolicy(policy_config)
@@ -842,7 +1061,7 @@ def get_image(ts, camera_names):
 
 
 def eval_bc(config, ckpt_name, save_episode=True):
-    set_seed(200)
+    set_seed(1000)
     ckpt_dir = config["ckpt_dir"]
     state_dim = config["state_dim"]
     real_robot = config["real_robot"]
@@ -893,6 +1112,7 @@ def eval_bc(config, ckpt_name, save_episode=True):
     num_rollouts = 50
     episode_returns = []
     highest_rewards = []
+    episode_lens = []
     for rollout_id in range(num_rollouts):
         rollout_id += 0
         ### set task
@@ -945,10 +1165,10 @@ def eval_bc(config, ckpt_name, save_episode=True):
                 curr_image = get_image(ts, camera_names)
                 
                 ### query policy
-                query_frequency = 48
                 if config["policy_class"] == "ACT" or config["policy_class"] == "DP":
                     if t % query_frequency == 0:
                         all_actions = policy(qpos, curr_image)
+                        # all_actions = all_actions[:,::2]
                     if temporal_agg:
                         all_time_actions[[t], t : t + num_queries] = all_actions
                         actions_for_curr_step = all_time_actions[:, t]
@@ -1002,6 +1222,8 @@ def eval_bc(config, ckpt_name, save_episode=True):
         episode_returns.append(episode_return)
         episode_highest_reward = np.max(rewards)
         highest_rewards.append(episode_highest_reward)
+        if episode_highest_reward==env_max_reward:
+            episode_lens.append(t)
         print(
             f"Rollout {rollout_id}\n{episode_return=}, {episode_highest_reward=}, {env_max_reward=}, Success: {episode_highest_reward==env_max_reward}"
         )
@@ -1034,7 +1256,7 @@ def eval_bc(config, ckpt_name, save_episode=True):
 
     success_rate = np.mean(np.array(highest_rewards) == env_max_reward)
     avg_return = np.mean(episode_returns)
-    summary_str = f"\nSuccess rate: {success_rate}\nAverage return: {avg_return}\n\n"
+    summary_str = f"\nSuccess rate: {success_rate}\nAverage return: {avg_return}\nAverage length: {np.sum(episode_lens)/len(episode_lens)}\n\n"
 
     for r in range(env_max_reward + 1):
         more_or_equal_r = (np.array(highest_rewards) >= r).sum()
